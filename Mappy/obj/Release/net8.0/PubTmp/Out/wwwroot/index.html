@@ -1,0 +1,134 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+    <title>Virtual Paradise - Blizzard Map</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Include Leaflet CSS and JS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- Include SignalR JS -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/7.0.4/signalr.min.js"></script>
+    <style>
+        html, body {
+            height: 100%;
+            margin: 0;
+        }
+
+        #map {
+            height: 100%;
+        }
+        /* Coordinate display overlay */
+        #coords {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            padding: 4px 8px;
+            background: rgba(255,255,255,0.8);
+            font-family: sans-serif;
+            font-size: 14px;
+            border-radius: 4px;
+            z-index: 1000;
+        }
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <div id="coords">VP: </div>
+    <script>
+        // Conversion functions
+        function convertVPToLeaflet(vpX, vpZ) {
+            // Invert VP X coordinate for the Leaflet coordinate system.
+            return [vpZ, -vpX];
+        }
+
+        function convertLeafletToVP(latlng) {
+            // Convert back from Leaflet coordinate to VP.
+            return { x: -latlng.lng, z: latlng.lat };
+        }
+
+        // Define the image bounds in VP world units ([y, x] order)
+        var bounds = [
+            [-839.6827034622862, -622.9113488478993], // southwest
+            [678.8500251189461, 572.6134629922306]    // northeast
+        ];
+
+        // Calculate the center of the bounds.
+        var centerY = (-839.6827034622862 + 678.8500251189461) / 2;
+        var centerX = (-622.9113488478993 + 572.6134629922306) / 2;
+        var center = [centerY, centerX];
+
+        // Initialize the map with CRS.Simple.
+        var map = L.map('map', {
+            crs: L.CRS.Simple,
+            center: center,
+            zoom: 0,
+            minZoom: 1,
+            maxZoom: 5
+        });
+        // Add your custom map image (adjust 'map.png' as needed).
+        L.imageOverlay('map.png', bounds).addTo(map);
+        map.fitBounds(bounds);
+
+        // Optional: Use a custom icon for avatars (person.png should be in wwwroot).
+        var personIcon = L.icon({
+            iconUrl: 'person.png',   // Ensure this file exists.
+            iconSize: [32, 32],
+            iconAnchor: [16, 16],
+            popupAnchor: [0, -16]
+        });
+
+        // Global dictionary for markers keyed by avatar name.
+        var markers = {};
+
+        // Create a SignalR connection.
+        var connection = new signalR.HubConnectionBuilder()
+            .withUrl("/locationHub")
+            .build();
+
+        // Listen for location updates.
+        connection.on("ReceiveLocation", function (avatarName, vpX, vpZ, altitude) {
+            console.log("ReceiveLocation", avatarName, vpX, vpZ, altitude);
+            var latlng = convertVPToLeaflet(vpX, vpZ);
+
+            if (markers[avatarName]) {
+                // Update existing marker.
+                markers[avatarName].setLatLng(latlng);
+                markers[avatarName].getPopup().setContent(
+                    "Avatar: " + avatarName + "<br/>VP X: " + vpX.toFixed(2) +
+                    "<br/>VP Z: " + vpZ.toFixed(2) + "<br/>Altitude: " + altitude.toFixed(2)
+                );
+            } else {
+                // Create new marker with the custom icon.
+                var marker = L.marker(latlng, { icon: personIcon }).addTo(map);
+                marker.bindPopup(
+                    "Avatar: " + avatarName + "<br/>VP X: " + vpX.toFixed(2) +
+                    "<br/>VP Z: " + vpZ.toFixed(2) + "<br/>Altitude: " + altitude.toFixed(2)
+                );
+                markers[avatarName] = marker;
+            }
+        });
+
+        // Listen for RemoveAvatar messages.
+        connection.on("RemoveAvatar", function (avatarName) {
+            console.log("RemoveAvatar", avatarName);
+            if (markers[avatarName]) {
+                map.removeLayer(markers[avatarName]);
+                delete markers[avatarName];
+            }
+        });
+
+        // Update coordinate overlay on mouse move.
+        map.on('mousemove', function (e) {
+            var vpCoord = convertLeafletToVP(e.latlng);
+            document.getElementById('coords').innerHTML =
+                "VP: X: " + vpCoord.x.toFixed(2) + ", Z: " + vpCoord.z.toFixed(2);
+        });
+
+        // Start the SignalR connection.
+        connection.start().catch(function (err) {
+            console.error("SignalR error: ", err.toString());
+        });
+    </script>
+</body>
+</html>

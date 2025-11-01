@@ -1,0 +1,13 @@
+C:\Users\Tom\source\repos\Mappy\Mappy\obj\Release\net8.0\PubTmp\Out\Mappy.exe
+C:\Users\Tom\source\repos\Mappy\Mappy\obj\Release\net8.0\PubTmp\Out\appsettings.Development.json
+C:\Users\Tom\source\repos\Mappy\Mappy\obj\Release\net8.0\PubTmp\Out\appsettings.json
+C:\Users\Tom\source\repos\Mappy\Mappy\obj\Release\net8.0\PubTmp\Out\VPSDK.dll
+C:\Users\Tom\source\repos\Mappy\Mappy\obj\Release\net8.0\PubTmp\Out\Mappy.dll
+C:\Users\Tom\source\repos\Mappy\Mappy\obj\Release\net8.0\PubTmp\Out\Mappy.deps.json
+C:\Users\Tom\source\repos\Mappy\Mappy\obj\Release\net8.0\PubTmp\Out\Mappy.runtimeconfig.json
+C:\Users\Tom\source\repos\Mappy\Mappy\obj\Release\net8.0\PubTmp\Out\Mappy.pdb
+C:\Users\Tom\source\repos\Mappy\Mappy\obj\Release\net8.0\PubTmp\Out\Microsoft.OpenApi.dll
+C:\Users\Tom\source\repos\Mappy\Mappy\obj\Release\net8.0\PubTmp\Out\Swashbuckle.AspNetCore.Swagger.dll
+C:\Users\Tom\source\repos\Mappy\Mappy\obj\Release\net8.0\PubTmp\Out\Swashbuckle.AspNetCore.SwaggerGen.dll
+C:\Users\Tom\source\repos\Mappy\Mappy\obj\Release\net8.0\PubTmp\Out\Swashbuckle.AspNetCore.SwaggerUI.dll
+C:\Users\Tom\source\repos\Mappy\Mappy\obj\Release\net8.0\PubTmp\Out\VpNet.dll

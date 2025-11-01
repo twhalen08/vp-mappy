@@ -1,0 +1,4 @@
+wwwroot\index.html
+wwwroot\map.png
+wwwroot\minimap.html
+wwwroot\person.png

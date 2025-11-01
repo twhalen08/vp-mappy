@@ -1,0 +1,239 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+    <title>GTA‑Style Minimap HUD with Stable Off‑Edge Markers</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Leaflet CSS & JS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- SignalR JS -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/7.0.4/signalr.min.js"></script>
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            overflow: hidden;
+            background: transparent;
+        }
+        /* Minimap container */
+        #minimap {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            width: 200px;
+            height: 200px;
+            border: 2px solid #fff;
+            z-index: 1001;
+            cursor: pointer;
+        }
+
+        .custom-player-icon div {
+            text-shadow: 0 0 2px #000;
+        }
+    </style>
+</head>
+<body>
+    <div id="minimap"></div>
+    <script>
+    // Helper: Read query parameter (e.g., ?user=Tom)
+    function getQueryParam(name) {
+      const params = new URLSearchParams(window.location.search);
+      return params.get(name);
+    }
+    var currentUser = getQueryParam('user');
+    if (!currentUser) {
+      alert("No user specified. Use the query string, e.g., ?user=Tom");
+    }
+
+    // Define VP map bounds ([southwest, northeast]) and default center.
+    var bounds = [
+      [-839.6827034622862, -622.9113488478993],
+      [678.8500251189461, 572.6134629922306]
+    ];
+    var centerY = (-839.6827034622862 + 678.8500251189461) / 2;
+    var centerX = (-622.9113488478993 + 572.6134629922306) / 2;
+    var defaultCenter = [centerY, centerX];
+
+    // Conversion: VP (vpX, vpZ) -> Leaflet ([vpZ, -vpX])
+    function convertVPToLeaflet(vpX, vpZ) {
+      return [vpZ, -vpX];
+    }
+
+    // Basic clamping with stagger: clamps a trueLatLng to near the edge and adds a perpendicular offset.
+    function clampToEdgeWithStagger(trueLatLng, map, avatarName) {
+      var margin = 15; // margin in pixels
+      var containerPoint = map.latLngToContainerPoint(trueLatLng);
+      var size = map.getSize();
+      var clampedX = Math.min(Math.max(containerPoint.x, margin), size.x - margin);
+      var clampedY = Math.min(Math.max(containerPoint.y, margin), size.y - margin);
+      var clampedPoint = L.point(clampedX, clampedY);
+      var mapCenterPoint = L.point(size.x / 2, size.y / 2);
+      var dx = clampedPoint.x - mapCenterPoint.x;
+      var dy = clampedPoint.y - mapCenterPoint.y;
+      var perp = L.point(-dy, dx);
+      var mag = Math.sqrt(perp.x * perp.x + perp.y * perp.y);
+      if (mag > 0) {
+        perp.x /= mag;
+        perp.y /= mag;
+      }
+      var hash = 0;
+      for (var i = 0; i < avatarName.length; i++) {
+        hash += avatarName.charCodeAt(i);
+      }
+      var offsetMultiplier = (hash % 3) - 1;
+      var offsetPixels = 10 * offsetMultiplier;
+      var offsetPoint = L.point(clampedPoint.x + perp.x * offsetPixels,
+                                 clampedPoint.y + perp.y * offsetPixels);
+      return map.containerPointToLatLng(offsetPoint);
+    }
+
+    // Create custom div icon for a player.
+    function createPlayerIcon(avatarName, color) {
+      var firstLetter = avatarName.charAt(0).toUpperCase();
+      return L.divIcon({
+        className: 'custom-player-icon',
+        html: `<div style="
+            background-color: ${color};
+            width: 30px;
+            height: 30px;
+            line-height: 30px;
+            border-radius: 50%;
+            text-align: center;
+            color: #fff;
+            font-weight: bold;
+            border: 2px solid #fff;">
+              ${firstLetter}
+          </div>`,
+        iconSize: [30, 30],
+        iconAnchor: [15, 15]
+      });
+    }
+
+    function getRandomColor() {
+      var letters = '0123456789ABCDEF';
+      var color = '#';
+      for (var i = 0; i < 6; i++) {
+        color += letters[Math.floor(Math.random() * 16)];
+      }
+      return color;
+    }
+
+    // Helper to update a marker smoothly if movement is significant.
+    function updateMarkerPosition(marker, newLatLng, duration) {
+      // Get container points and compare difference.
+      var currentPt = map.latLngToContainerPoint(marker.getLatLng());
+      var newPt = map.latLngToContainerPoint(newLatLng);
+      var dx = currentPt.x - newPt.x;
+      var dy = currentPt.y - newPt.y;
+      var dist = Math.sqrt(dx*dx + dy*dy);
+      var threshold = 5; // pixels threshold
+      if (dist < threshold) {
+        return; // change is minor; skip update.
+      }
+      animateMarker(marker, newLatLng, duration);
+    }
+
+    // Animate marker movement over a given duration.
+    function animateMarker(marker, targetLatLng, duration) {
+      duration = duration || 500;
+      var startTime = performance.now();
+      var initialLatLng = marker.getLatLng();
+      function animate(time) {
+        var progress = Math.min((time - startTime) / duration, 1);
+        var newLat = initialLatLng.lat + (targetLatLng.lat - initialLatLng.lat) * progress;
+        var newLng = initialLatLng.lng + (targetLatLng.lng - initialLatLng.lng) * progress;
+        marker.setLatLng([newLat, newLng]);
+        if (progress < 1) {
+          requestAnimationFrame(animate);
+        }
+      }
+      requestAnimationFrame(animate);
+    }
+
+    var markers = {};
+    var markerColors = {}; // avatarName -> color
+
+    // Set zoom level to 4.
+    var currentZoomLevel = 4;
+
+    var map = L.map('minimap', {
+      crs: L.CRS.Simple,
+      center: defaultCenter,
+      zoom: currentZoomLevel,
+      minZoom: 1,
+      maxZoom: 10,
+      zoomControl: false,
+      doubleClickZoom: false,
+      dragging: false,
+      scrollWheelZoom: false,
+      keyboard: false,
+      attributionControl: false
+    });
+    L.imageOverlay('map.png', bounds).addTo(map);
+    map.fitBounds(bounds);
+
+    var connection = new signalR.HubConnectionBuilder()
+      .withUrl("/locationHub")
+      .build();
+
+    connection.on("ReceiveLocation", function (avatarName, vpX, vpZ, altitude) {
+      var trueLatLng = convertVPToLeaflet(vpX, vpZ);
+      var pos;
+      if (avatarName === currentUser) {
+        pos = trueLatLng;
+        // Smoothly pan the map on the current user.
+        map.panTo(trueLatLng, { animate: true, duration: 0.5 });
+        if (markers[avatarName]) {
+          markers[avatarName].setLatLng(pos);
+        } else {
+          markerColors[avatarName] = getRandomColor();
+          var icon = createPlayerIcon(avatarName, markerColors[avatarName]);
+          markers[avatarName] = L.marker(pos, { icon: icon }).addTo(map);
+        }
+      } else {
+        if (map.getBounds().contains(trueLatLng)) {
+          pos = trueLatLng;
+        } else {
+          pos = clampToEdgeWithStagger(trueLatLng, map, avatarName);
+        }
+        markerColors[avatarName] = markerColors[avatarName] || getRandomColor();
+        var icon = createPlayerIcon(avatarName, markerColors[avatarName]);
+        if (markers[avatarName]) {
+          updateMarkerPosition(markers[avatarName], pos, 500);
+          markers[avatarName].setIcon(icon);
+        } else {
+          markers[avatarName] = L.marker(pos, { icon: icon }).addTo(map);
+        }
+      }
+      // Store the true position on the marker.
+      markers[avatarName].myTrueLatLng = trueLatLng;
+    });
+
+    connection.on("RemoveAvatar", function (avatarName) {
+      if (markers[avatarName]) {
+        map.removeLayer(markers[avatarName]);
+        delete markers[avatarName];
+        delete markerColors[avatarName];
+      }
+    });
+
+    connection.start().catch(function (err) {
+      console.error("SignalR error: ", err.toString());
+    });
+
+    // On moveend, update off-screen markers.
+    map.on('moveend', function () {
+      var bounds = map.getBounds();
+      for (var avatarName in markers) {
+        if (avatarName === currentUser) continue;
+        var marker = markers[avatarName];
+        var truePos = marker.myTrueLatLng || marker.getLatLng();
+        var newPos = map.getBounds().contains(truePos) ? truePos : clampToEdgeWithStagger(truePos, map, avatarName);
+        updateMarkerPosition(marker, newPos, 500);
+      }
+    });
+    </script>
+</body>
+</html>
