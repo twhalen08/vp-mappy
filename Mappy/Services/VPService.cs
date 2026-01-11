@@ -58,9 +58,7 @@ namespace Mappy
 
             _client.AvatarEntered += async (sender, e) =>
             {
-                var token = _overlayTokenService.CreateToken(e.Avatar.Name, e.Avatar.Session);
-                var overlayUrl = $"{_overlayAuthOptions.OverlayBaseUrl.TrimEnd('/')}/minimap.html?token={Uri.EscapeDataString(token)}&user={Uri.EscapeDataString(e.Avatar.Name)}";
-                _client.UrlSendOverlay(e.Avatar, overlayUrl);
+                await SendOverlayToAvatar(e.Avatar);
             };
             // Subscribe to chat messages for ghost/unghost commands.
             _client.ChatMessageReceived += async (sender, e) =>
@@ -92,6 +90,14 @@ namespace Mappy
                 // Login and enter the world (replace "" with your password)
                 await _client.LoginAndEnterAsync("xxxxxxxxx", true);
                 Console.WriteLine("Logged into Virtual Paradise.");
+
+                foreach (var avatar in _client.Avatars)
+                {
+                    if (!avatar.IsBot)
+                    {
+                        await SendOverlayToAvatar(avatar);
+                    }
+                }
             }
             catch (Exception ex)
             {
@@ -136,6 +142,14 @@ namespace Mappy
             {
                 Console.WriteLine("Error polling avatar positions: " + ex.Message);
             }
+        }
+
+        private Task SendOverlayToAvatar(Avatar avatar)
+        {
+            var token = _overlayTokenService.CreateToken(avatar.Name, avatar.Session);
+            var overlayUrl = $"{_overlayAuthOptions.OverlayBaseUrl.TrimEnd('/')}/minimap.html?token={Uri.EscapeDataString(token)}&user={Uri.EscapeDataString(avatar.Name)}";
+            _client.UrlSendOverlay(avatar, overlayUrl);
+            return Task.CompletedTask;
         }
 
         public Task StopAsync(CancellationToken cancellationToken)
