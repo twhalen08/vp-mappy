@@ -16,7 +16,11 @@ namespace Mappy.Hubs
         public override Task OnConnectedAsync()
         {
             var httpContext = Context.GetHttpContext();
-            var token = httpContext?.Request.Query["token"].ToString();
+            var token = httpContext?.Request.Query["access_token"].ToString();
+            if (string.IsNullOrWhiteSpace(token))
+            {
+                token = httpContext?.Request.Query["token"].ToString();
+            }
 
             if (!_overlayTokenService.TryValidateToken(token, out var payload))
             {

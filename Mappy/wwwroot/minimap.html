@@ -179,7 +179,9 @@
     map.fitBounds(bounds);
 
     var connection = new signalR.HubConnectionBuilder()
-      .withUrl("/locationHub?token=" + encodeURIComponent(overlayToken || ""))
+      .withUrl("/locationHub", {
+        accessTokenFactory: function () { return overlayToken || ""; }
+      })
       .build();
 
     connection.on("ReceiveLocation", function (avatarName, vpX, vpZ, altitude) {
