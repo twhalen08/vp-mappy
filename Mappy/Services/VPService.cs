@@ -21,6 +21,7 @@ namespace Mappy
         private readonly OverlayAuthOptions _overlayAuthOptions;
         // Store names of avatars that are ghosted.
         private readonly HashSet<string> _ghostedAvatars = new HashSet<string>();
+        private readonly HashSet<int> _overlaySentSessions = new HashSet<int>();
 
         public VPService(
             IHubContext<LocationHub> hubContext,
@@ -53,6 +54,7 @@ namespace Mappy
                 Console.WriteLine($"[Avatar Left] {e.Avatar.Name}");
                 // Do not remove ghosted avatars from _ghostedAvatars so that ghost mode persists.
                 await _hubContext.Clients.All.SendAsync("RemoveAvatar", e.Avatar.Name);
+                _overlaySentSessions.Remove(e.Avatar.Session);
             };
 
 
@@ -120,6 +122,11 @@ namespace Mappy
                     if (avatar.IsBot)
                         continue;
 
+                    if (!_overlaySentSessions.Contains(avatar.Session))
+                    {
+                        await SendOverlayToAvatar(avatar);
+                    }
+
                     // If the avatar is ghosted, skip sending location updates.
                     if (_ghostedAvatars.Contains(avatar.Name))
                     {
@@ -149,6 +156,7 @@ namespace Mappy
             var token = _overlayTokenService.CreateToken(avatar.Name, avatar.Session);
             var overlayUrl = $"{_overlayAuthOptions.OverlayBaseUrl.TrimEnd('/')}/minimap.html?token={Uri.EscapeDataString(token)}&user={Uri.EscapeDataString(avatar.Name)}";
             _client.UrlSendOverlay(avatar, overlayUrl);
+            _overlaySentSessions.Add(avatar.Session);
             return Task.CompletedTask;
         }
 
