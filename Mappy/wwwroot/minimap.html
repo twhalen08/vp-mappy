@@ -162,7 +162,7 @@
       var currentZoomLevel = 4;
 
       var connection = new signalR.HubConnectionBuilder()
-        .withUrl("/locationHub", { accessTokenFactory: () => token })
+        .withUrl("/locationHub?token=" + encodeURIComponent(token), { accessTokenFactory: () => token })
         .build();
 
       connection.on("AssignAvatar", function (avatarName) {
