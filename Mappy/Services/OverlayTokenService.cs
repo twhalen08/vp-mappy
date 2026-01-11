@@ -121,7 +121,7 @@ namespace Mappy.Services
         }
     }
 
-    public readonly record struct OverlayTokenPayload
+    public sealed record OverlayTokenPayload
     {
         public string AvatarName { get; init; }
         public int SessionId { get; init; }
