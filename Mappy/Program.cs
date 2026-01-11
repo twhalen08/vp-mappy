@@ -3,11 +3,14 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Mappy.Hubs;   // Our SignalR hub (see below)
 using Mappy;      // Our VPService background service
+using Mappy.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
 // Register SignalR.
 builder.Services.AddSignalR();
+builder.Services.AddMemoryCache();
+builder.Services.AddSingleton<OverlayTokenService>();
 
 // Register the VPService as a hosted background service.
 builder.Services.AddHostedService<VPService>();
