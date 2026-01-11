@@ -7,6 +7,8 @@ using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Hosting;
 using VpNet;
 using Mappy.Hubs;
+using Mappy.Services;
+using Microsoft.Extensions.Options;
 
 namespace Mappy
 {
@@ -15,13 +17,22 @@ namespace Mappy
         private VirtualParadiseClient _client;
         private Timer _pollTimer;
         private readonly IHubContext<LocationHub> _hubContext;
+        private readonly IOverlayTokenService _overlayTokenService;
+        private readonly OverlayAuthOptions _overlayAuthOptions;
         // Store names of avatars that are ghosted.
         private readonly HashSet<string> _ghostedAvatars = new HashSet<string>();
+        private readonly Dictionary<int, DateTimeOffset> _overlaySentSessions = new Dictionary<int, DateTimeOffset>();
+        private static readonly TimeSpan OverlayResendInterval = TimeSpan.FromSeconds(15);
 
-        public VPService(IHubContext<LocationHub> hubContext)
+        public VPService(
+            IHubContext<LocationHub> hubContext,
+            IOverlayTokenService overlayTokenService,
+            IOptions<OverlayAuthOptions> overlayAuthOptions)
         {
             _client = new VirtualParadiseClient();
             _hubContext = hubContext;
+            _overlayTokenService = overlayTokenService;
+            _overlayAuthOptions = overlayAuthOptions.Value;
         }
 
         public async Task StartAsync(CancellationToken cancellationToken)
@@ -44,12 +55,13 @@ namespace Mappy
                 Console.WriteLine($"[Avatar Left] {e.Avatar.Name}");
                 // Do not remove ghosted avatars from _ghostedAvatars so that ghost mode persists.
                 await _hubContext.Clients.All.SendAsync("RemoveAvatar", e.Avatar.Name);
+                _overlaySentSessions.Remove(e.Avatar.Session);
             };
 
 
             _client.AvatarEntered += async (sender, e) =>
             {
-                _client.UrlSendOverlay(e.Avatar, "https://ayo.thruhere.net/minimap.html?user=" + e.Avatar.Name);
+                await SendOverlayToAvatar(e.Avatar);
             };
             // Subscribe to chat messages for ghost/unghost commands.
             _client.ChatMessageReceived += async (sender, e) =>
@@ -81,6 +93,14 @@ namespace Mappy
                 // Login and enter the world (replace "" with your password)
                 await _client.LoginAndEnterAsync("xxxxxxxxx", true);
                 Console.WriteLine("Logged into Virtual Paradise.");
+
+                foreach (var avatar in _client.Avatars)
+                {
+                    if (!avatar.IsBot)
+                    {
+                        await SendOverlayToAvatar(avatar);
+                    }
+                }
             }
             catch (Exception ex)
             {
@@ -102,6 +122,11 @@ namespace Mappy
                 {
                     if (avatar.IsBot)
                         continue;
+
+                    if (ShouldSendOverlay(avatar.Session))
+                    {
+                        await SendOverlayToAvatar(avatar);
+                    }
 
                     // If the avatar is ghosted, skip sending location updates.
                     if (_ghostedAvatars.Contains(avatar.Name))
@@ -125,6 +150,25 @@ namespace Mappy
             {
                 Console.WriteLine("Error polling avatar positions: " + ex.Message);
             }
+        }
+
+        private Task SendOverlayToAvatar(Avatar avatar)
+        {
+            var token = _overlayTokenService.CreateToken(avatar.Name, avatar.Session);
+            var overlayUrl = $"{_overlayAuthOptions.OverlayBaseUrl.TrimEnd('/')}/minimap.html?token={Uri.EscapeDataString(token)}&user={Uri.EscapeDataString(avatar.Name)}";
+            _client.UrlSendOverlay(avatar, overlayUrl);
+            _overlaySentSessions[avatar.Session] = DateTimeOffset.UtcNow;
+            return Task.CompletedTask;
+        }
+
+        private bool ShouldSendOverlay(int sessionId)
+        {
+            if (!_overlaySentSessions.TryGetValue(sessionId, out var lastSentAt))
+            {
+                return true;
+            }
+
+            return DateTimeOffset.UtcNow - lastSentAt >= OverlayResendInterval;
         }
 
         public Task StopAsync(CancellationToken cancellationToken)

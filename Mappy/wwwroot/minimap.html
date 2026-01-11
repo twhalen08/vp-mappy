@@ -37,14 +37,18 @@
 <body>
     <div id="minimap"></div>
     <script>
-    // Helper: Read query parameter (e.g., ?user=Tom)
+    // Helper: Read query parameter (e.g., ?token=abc123)
     function getQueryParam(name) {
       const params = new URLSearchParams(window.location.search);
       return params.get(name);
     }
+    var overlayToken = getQueryParam('token');
     var currentUser = getQueryParam('user');
+    if (!overlayToken) {
+      alert("No token specified. This overlay is tied to a Virtual Paradise session.");
+    }
     if (!currentUser) {
-      alert("No user specified. Use the query string, e.g., ?user=Tom");
+      console.warn("No user specified. The minimap will not auto-center.");
     }
 
     // Define VP map bounds ([southwest, northeast]) and default center.
@@ -175,13 +179,15 @@
     map.fitBounds(bounds);
 
     var connection = new signalR.HubConnectionBuilder()
-      .withUrl("/locationHub")
+      .withUrl("/locationHub", {
+        accessTokenFactory: function () { return overlayToken || ""; }
+      })
       .build();
 
     connection.on("ReceiveLocation", function (avatarName, vpX, vpZ, altitude) {
       var trueLatLng = convertVPToLeaflet(vpX, vpZ);
       var pos;
-      if (avatarName === currentUser) {
+      if (currentUser && avatarName === currentUser) {
         pos = trueLatLng;
         // Smoothly pan the map on the current user.
         map.panTo(trueLatLng, { animate: true, duration: 0.5 });
