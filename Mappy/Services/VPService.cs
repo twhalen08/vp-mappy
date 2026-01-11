@@ -21,7 +21,8 @@ namespace Mappy
         private readonly OverlayAuthOptions _overlayAuthOptions;
         // Store names of avatars that are ghosted.
         private readonly HashSet<string> _ghostedAvatars = new HashSet<string>();
-        private readonly HashSet<int> _overlaySentSessions = new HashSet<int>();
+        private readonly Dictionary<int, DateTimeOffset> _overlaySentSessions = new Dictionary<int, DateTimeOffset>();
+        private static readonly TimeSpan OverlayResendInterval = TimeSpan.FromSeconds(15);
 
         public VPService(
             IHubContext<LocationHub> hubContext,
@@ -122,7 +123,7 @@ namespace Mappy
                     if (avatar.IsBot)
                         continue;
 
-                    if (!_overlaySentSessions.Contains(avatar.Session))
+                    if (ShouldSendOverlay(avatar.Session))
                     {
                         await SendOverlayToAvatar(avatar);
                     }
@@ -156,8 +157,18 @@ namespace Mappy
             var token = _overlayTokenService.CreateToken(avatar.Name, avatar.Session);
             var overlayUrl = $"{_overlayAuthOptions.OverlayBaseUrl.TrimEnd('/')}/minimap.html?token={Uri.EscapeDataString(token)}&user={Uri.EscapeDataString(avatar.Name)}";
             _client.UrlSendOverlay(avatar, overlayUrl);
-            _overlaySentSessions.Add(avatar.Session);
+            _overlaySentSessions[avatar.Session] = DateTimeOffset.UtcNow;
             return Task.CompletedTask;
+        }
+
+        private bool ShouldSendOverlay(int sessionId)
+        {
+            if (!_overlaySentSessions.TryGetValue(sessionId, out var lastSentAt))
+            {
+                return true;
+            }
+
+            return DateTimeOffset.UtcNow - lastSentAt >= OverlayResendInterval;
         }
 
         public Task StopAsync(CancellationToken cancellationToken)
