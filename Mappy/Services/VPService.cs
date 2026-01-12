@@ -121,6 +121,11 @@ namespace Mappy
                     // Get up-to-date position using the session id.
                     var avQuery = _client.GetAvatar(avatar.Session);
                     var pos = avQuery.Location.Position;
+                    if (!double.IsFinite(pos.X) || !double.IsFinite(pos.Y) || !double.IsFinite(pos.Z))
+                    {
+                        Console.WriteLine($"[Invalid Position] {avatar.Name}: ({pos.X}, {pos.Y}, {pos.Z})");
+                        continue;
+                    }
                     Console.WriteLine($"  {avatar.Name} (Session: {avatar.Session}): ({pos.X:F2}, {pos.Y:F2}, {pos.Z:F2})");
 
                     // Broadcast the update to connected SignalR clients.
