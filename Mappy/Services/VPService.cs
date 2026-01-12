@@ -54,7 +54,9 @@ namespace Mappy
             {
                 var token = _overlayTokenService.CreateToken(e.Avatar.Name);
                 var encodedToken = Uri.EscapeDataString(token);
-                _client.UrlSendOverlay(e.Avatar, $"https://ayo.thruhere.net/minimap.html?token={encodedToken}");
+                var overlayUrl = $"https://ayo.thruhere.net/minimap.html?token={encodedToken}";
+                Console.WriteLine($"[Overlay URL] {e.Avatar.Name}: {overlayUrl}");
+                _client.UrlSendOverlay(e.Avatar, overlayUrl);
             };
             // Subscribe to chat messages for ghost/unghost commands.
             _client.ChatMessageReceived += async (sender, e) =>
