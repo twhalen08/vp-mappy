@@ -9,7 +9,7 @@ namespace Mappy.Services
     {
         private readonly IMemoryCache _cache;
         private readonly TimeSpan _ttl = TimeSpan.FromMinutes(5);
-        private readonly bool _consumeOnValidate = true;
+        private readonly bool _consumeOnValidate = false;
 
         public OverlayTokenService(IMemoryCache cache)
         {
