@@ -194,7 +194,13 @@
       .build();
 
     connection.on("ReceiveLocation", function (avatarName, vpX, vpZ, altitude) {
-      var trueLatLng = convertVPToLeaflet(vpX, vpZ);
+      var numericX = Number(vpX);
+      var numericZ = Number(vpZ);
+      if (!Number.isFinite(numericX) || !Number.isFinite(numericZ)) {
+        console.warn("Skipping invalid location payload:", avatarName, vpX, vpZ, altitude);
+        return;
+      }
+      var trueLatLng = convertVPToLeaflet(numericX, numericZ);
       var pos;
       if (avatarName === currentUser) {
         pos = trueLatLng;
