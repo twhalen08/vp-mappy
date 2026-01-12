@@ -136,7 +136,8 @@
       var dist = Math.sqrt(dx*dx + dy*dy);
       var threshold = 5; // pixels threshold
       if (dist < threshold) {
-        return; // change is minor; skip update.
+        marker.setLatLng(newLatLng);
+        return; // change is minor; skip animation.
       }
       animateMarker(marker, newLatLng, duration);
     }
