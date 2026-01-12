@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Hosting;
+using Mappy.Services;
 using VpNet;
 using Mappy.Hubs;
 
@@ -15,13 +16,15 @@ namespace Mappy
         private VirtualParadiseClient _client;
         private Timer _pollTimer;
         private readonly IHubContext<LocationHub> _hubContext;
+        private readonly OverlayTokenService _overlayTokenService;
         // Store names of avatars that are ghosted.
         private readonly HashSet<string> _ghostedAvatars = new HashSet<string>();
 
-        public VPService(IHubContext<LocationHub> hubContext)
+        public VPService(IHubContext<LocationHub> hubContext, OverlayTokenService overlayTokenService)
         {
             _client = new VirtualParadiseClient();
             _hubContext = hubContext;
+            _overlayTokenService = overlayTokenService;
         }
 
         public async Task StartAsync(CancellationToken cancellationToken)
@@ -49,7 +52,9 @@ namespace Mappy
 
             _client.AvatarEntered += async (sender, e) =>
             {
-                _client.UrlSendOverlay(e.Avatar, "https://ayo.thruhere.net/minimap.html?user=" + e.Avatar.Name);
+                var token = _overlayTokenService.CreateToken(e.Avatar.Name);
+                var encodedToken = Uri.EscapeDataString(token);
+                _client.UrlSendOverlay(e.Avatar, $"https://ayo.thruhere.net/minimap.html?token={encodedToken}");
             };
             // Subscribe to chat messages for ghost/unghost commands.
             _client.ChatMessageReceived += async (sender, e) =>
