@@ -86,6 +86,16 @@
       return [vpZ, -vpX];
     }
 
+    function isValidLatLng(latLng) {
+      if (!latLng) {
+        return false;
+      }
+      if (Array.isArray(latLng)) {
+        return Number.isFinite(latLng[0]) && Number.isFinite(latLng[1]);
+      }
+      return Number.isFinite(latLng.lat) && Number.isFinite(latLng.lng);
+    }
+
     // Basic clamping with stagger: clamps a trueLatLng to near the edge and adds a perpendicular offset.
     function clampToEdgeWithStagger(trueLatLng, map, avatarName) {
       var margin = 15; // margin in pixels
@@ -147,6 +157,15 @@
 
     // Helper to update a marker smoothly.
     function updateMarkerPosition(marker, newLatLng, duration) {
+      if (!isValidLatLng(newLatLng)) {
+        console.warn("Skipping invalid marker target:", newLatLng);
+        return;
+      }
+      var currentLatLng = marker.getLatLng();
+      if (!isValidLatLng(currentLatLng)) {
+        console.warn("Skipping marker update with invalid current position:", currentLatLng);
+        return;
+      }
       animateMarker(marker, newLatLng, duration);
     }
 
@@ -201,23 +220,37 @@
         return;
       }
       var trueLatLng = convertVPToLeaflet(numericX, numericZ);
+      if (!isValidLatLng(trueLatLng)) {
+        console.warn("Skipping invalid converted coordinates:", avatarName, trueLatLng);
+        return;
+      }
       var pos;
       if (avatarName === currentUser) {
         pos = trueLatLng;
         // Smoothly pan the map on the current user.
-        map.panTo(trueLatLng, { animate: true, duration: 0.5 });
+        if (isValidLatLng(trueLatLng)) {
+          map.panTo(trueLatLng, { animate: true, duration: 0.5 });
+        }
         if (markers[avatarName]) {
-          markers[avatarName].setLatLng(pos);
+          if (isValidLatLng(pos)) {
+            markers[avatarName].setLatLng(pos);
+          }
         } else {
           markerColors[avatarName] = getRandomColor();
           var icon = createPlayerIcon(avatarName, markerColors[avatarName]);
-          markers[avatarName] = L.marker(pos, { icon: icon }).addTo(map);
+          if (isValidLatLng(pos)) {
+            markers[avatarName] = L.marker(pos, { icon: icon }).addTo(map);
+          }
         }
       } else {
         if (map.getBounds().contains(trueLatLng)) {
           pos = trueLatLng;
         } else {
           pos = clampToEdgeWithStagger(trueLatLng, map, avatarName);
+        }
+        if (!isValidLatLng(pos)) {
+          console.warn("Skipping invalid marker position:", avatarName, pos);
+          return;
         }
         markerColors[avatarName] = markerColors[avatarName] || getRandomColor();
         var icon = createPlayerIcon(avatarName, markerColors[avatarName]);
