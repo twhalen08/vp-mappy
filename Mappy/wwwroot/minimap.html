@@ -68,7 +68,7 @@
       }
     }
 
-    if (!token || !currentUser) {
+    if (!token) {
       alert("Missing or invalid token. Please reconnect to get a valid overlay link.");
     }
 
@@ -244,9 +244,23 @@
       }
     });
 
-    connection.start().catch(function (err) {
-      console.error("SignalR error: ", err.toString());
-    });
+    if (token) {
+      connection.start()
+        .then(function () {
+          return connection.invoke("GetCurrentUser");
+        })
+        .then(function (serverUser) {
+          if (serverUser) {
+            currentUser = serverUser;
+          } else if (!currentUser) {
+            alert("Missing or invalid token. Please reconnect to get a valid overlay link.");
+          }
+        })
+        .catch(function (err) {
+          console.error("SignalR error: ", err.toString());
+          alert("Missing or invalid token. Please reconnect to get a valid overlay link.");
+        });
+    }
 
     // On moveend, update off-screen markers.
     map.on('moveend', function () {
