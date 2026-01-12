@@ -145,18 +145,8 @@
       return color;
     }
 
-    // Helper to update a marker smoothly if movement is significant.
+    // Helper to update a marker smoothly.
     function updateMarkerPosition(marker, newLatLng, duration) {
-      // Get container points and compare difference.
-      var currentPt = map.latLngToContainerPoint(marker.getLatLng());
-      var newPt = map.latLngToContainerPoint(newLatLng);
-      var dx = currentPt.x - newPt.x;
-      var dy = currentPt.y - newPt.y;
-      var dist = Math.sqrt(dx*dx + dy*dy);
-      var threshold = 5; // pixels threshold
-      if (dist < threshold) {
-        return; // change is minor; skip update.
-      }
       animateMarker(marker, newLatLng, duration);
     }
 
