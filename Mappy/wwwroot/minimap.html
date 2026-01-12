@@ -166,21 +166,7 @@
         .withUrl("/locationHub?token=" + encodeURIComponent(token), { accessTokenFactory: () => token })
         .build();
 
-      connection.on("AssignAvatar", function (avatarName) {
-        if (!avatarName) {
-          alert("Invalid token. Please reload the overlay.");
-          return;
-        }
-        currentUser = avatarName;
-        initializeMap();
-      });
-
-      connection.on("TokenInvalid", function () {
-        alert("Invalid or expired token. Please reload the overlay.");
-        connection.stop();
-      });
-
-      connection.on("ReceiveLocation", function (avatarName, vpX, vpZ, altitude) {
+      function handleLocationUpdate(avatarName, vpX, vpZ, altitude) {
         if (!map || !currentUser) {
           return;
         }
@@ -214,6 +200,33 @@
         }
         // Store the true position on the marker.
         markers[avatarName].myTrueLatLng = trueLatLng;
+      }
+
+      connection.on("AssignAvatar", function (avatarName) {
+        if (!avatarName) {
+          alert("Invalid token. Please reload the overlay.");
+          return;
+        }
+        currentUser = avatarName;
+        initializeMap();
+      });
+
+      connection.on("ReceiveLocationsSnapshot", function (locations) {
+        if (!map || !currentUser || !locations) {
+          return;
+        }
+        locations.forEach(function (location) {
+          handleLocationUpdate(location.avatarName, location.x, location.z, location.altitude);
+        });
+      });
+
+      connection.on("TokenInvalid", function () {
+        alert("Invalid or expired token. Please reload the overlay.");
+        connection.stop();
+      });
+
+      connection.on("ReceiveLocation", function (avatarName, vpX, vpZ, altitude) {
+        handleLocationUpdate(avatarName, vpX, vpZ, altitude);
       });
 
       connection.on("RemoveAvatar", function (avatarName) {

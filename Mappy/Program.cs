@@ -11,6 +11,7 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddSignalR();
 builder.Services.AddMemoryCache();
 builder.Services.AddSingleton<OverlayTokenService>();
+builder.Services.AddSingleton<AvatarLocationCache>();
 
 // Register the VPService as a hosted background service.
 builder.Services.AddHostedService<VPService>();

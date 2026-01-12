@@ -17,14 +17,19 @@ namespace Mappy
         private Timer _pollTimer;
         private readonly IHubContext<LocationHub> _hubContext;
         private readonly OverlayTokenService _overlayTokenService;
+        private readonly AvatarLocationCache _locationCache;
         // Store names of avatars that are ghosted.
         private readonly HashSet<string> _ghostedAvatars = new HashSet<string>();
 
-        public VPService(IHubContext<LocationHub> hubContext, OverlayTokenService overlayTokenService)
+        public VPService(
+            IHubContext<LocationHub> hubContext,
+            OverlayTokenService overlayTokenService,
+            AvatarLocationCache locationCache)
         {
             _client = new VirtualParadiseClient();
             _hubContext = hubContext;
             _overlayTokenService = overlayTokenService;
+            _locationCache = locationCache;
         }
 
         public async Task StartAsync(CancellationToken cancellationToken)
@@ -123,6 +128,7 @@ namespace Mappy
                     var avQuery = _client.GetAvatar(avatar.Session);
                     var pos = avQuery.Location.Position;
                     Console.WriteLine($"  {avatar.Name} (Session: {avatar.Session}): ({pos.X:F2}, {pos.Y:F2}, {pos.Z:F2})");
+                    _locationCache.Update(avatar.Name, pos.X, pos.Z, pos.Y);
 
                     // Broadcast the update to connected SignalR clients.
                     await _hubContext.Clients.All.SendAsync("ReceiveLocation",

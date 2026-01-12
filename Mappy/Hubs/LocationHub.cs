@@ -7,10 +7,12 @@ namespace Mappy.Hubs
     public class LocationHub : Hub
     {
         private readonly OverlayTokenService _overlayTokenService;
+        private readonly AvatarLocationCache _locationCache;
 
-        public LocationHub(OverlayTokenService overlayTokenService)
+        public LocationHub(OverlayTokenService overlayTokenService, AvatarLocationCache locationCache)
         {
             _overlayTokenService = overlayTokenService;
+            _locationCache = locationCache;
         }
 
         public override async Task OnConnectedAsync()
@@ -24,6 +26,7 @@ namespace Mappy.Hubs
             }
 
             await Clients.Caller.SendAsync("AssignAvatar", payload.AvatarName);
+            await Clients.Caller.SendAsync("ReceiveLocationsSnapshot", _locationCache.GetSnapshot());
             await base.OnConnectedAsync();
         }
 
