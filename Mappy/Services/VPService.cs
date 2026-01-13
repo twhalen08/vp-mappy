@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Hosting;
+using Mappy.Services;
 using VpNet;
 using Mappy.Hubs;
 
@@ -15,13 +16,20 @@ namespace Mappy
         private VirtualParadiseClient _client;
         private Timer _pollTimer;
         private readonly IHubContext<LocationHub> _hubContext;
+        private readonly OverlayTokenService _overlayTokenService;
+        private readonly AvatarLocationCache _locationCache;
         // Store names of avatars that are ghosted.
         private readonly HashSet<string> _ghostedAvatars = new HashSet<string>();
 
-        public VPService(IHubContext<LocationHub> hubContext)
+        public VPService(
+            IHubContext<LocationHub> hubContext,
+            OverlayTokenService overlayTokenService,
+            AvatarLocationCache locationCache)
         {
             _client = new VirtualParadiseClient();
             _hubContext = hubContext;
+            _overlayTokenService = overlayTokenService;
+            _locationCache = locationCache;
         }
 
         public async Task StartAsync(CancellationToken cancellationToken)
@@ -49,7 +57,12 @@ namespace Mappy
 
             _client.AvatarEntered += async (sender, e) =>
             {
-                _client.UrlSendOverlay(e.Avatar, "https://ayo.thruhere.net/minimap.html?user=" + e.Avatar.Name);
+                var token = _overlayTokenService.GenerateToken(
+                    e.Avatar.Name,
+                    _client.Configuration.World?.Name,
+                    e.Avatar.Session);
+                var overlayUrl = "https://ayo.thruhere.net/minimap.html?token=" + Uri.EscapeDataString(token);
+                _client.UrlSendOverlay(e.Avatar, overlayUrl);
             };
             // Subscribe to chat messages for ghost/unghost commands.
             _client.ChatMessageReceived += async (sender, e) =>
@@ -115,6 +128,7 @@ namespace Mappy
                     var avQuery = _client.GetAvatar(avatar.Session);
                     var pos = avQuery.Location.Position;
                     Console.WriteLine($"  {avatar.Name} (Session: {avatar.Session}): ({pos.X:F2}, {pos.Y:F2}, {pos.Z:F2})");
+                    _locationCache.Update(avatar.Name, pos.X, pos.Z, pos.Y);
 
                     // Broadcast the update to connected SignalR clients.
                     await _hubContext.Clients.All.SendAsync("ReceiveLocation",

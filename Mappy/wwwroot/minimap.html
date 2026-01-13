@@ -37,24 +37,30 @@
 <body>
     <div id="minimap"></div>
     <script>
-    // Helper: Read query parameter (e.g., ?user=Tom)
+    // Helper: Read query parameter (e.g., ?token=abc123)
     function getQueryParam(name) {
       const params = new URLSearchParams(window.location.search);
       return params.get(name);
     }
-    var currentUser = getQueryParam('user');
-    if (!currentUser) {
-      alert("No user specified. Use the query string, e.g., ?user=Tom");
+    var token = getQueryParam('token');
+    if (!token) {
+      alert("No token provided. Use the query string, e.g., ?token=abc123");
     }
 
-    // Define VP map bounds ([southwest, northeast]) and default center.
-    var bounds = [
-      [-839.6827034622862, -622.9113488478993],
-      [678.8500251189461, 572.6134629922306]
-    ];
-    var centerY = (-839.6827034622862 + 678.8500251189461) / 2;
-    var centerX = (-622.9113488478993 + 572.6134629922306) / 2;
-    var defaultCenter = [centerY, centerX];
+    if (token) {
+      var currentUser = null;
+      var map = null;
+      var markers = {};
+      var markerColors = {}; // avatarName -> color
+
+      // Define VP map bounds ([southwest, northeast]) and default center.
+      var bounds = [
+        [-839.6827034622862, -622.9113488478993],
+        [678.8500251189461, 572.6134629922306]
+      ];
+      var centerY = (-839.6827034622862 + 678.8500251189461) / 2;
+      var centerX = (-622.9113488478993 + 572.6134629922306) / 2;
+      var defaultCenter = [centerY, centerX];
 
     // Conversion: VP (vpX, vpZ) -> Leaflet ([vpZ, -vpX])
     function convertVPToLeaflet(vpX, vpZ) {
@@ -130,7 +136,8 @@
       var dist = Math.sqrt(dx*dx + dy*dy);
       var threshold = 5; // pixels threshold
       if (dist < threshold) {
-        return; // change is minor; skip update.
+        marker.setLatLng(newLatLng);
+        return; // change is minor; skip animation.
       }
       animateMarker(marker, newLatLng, duration);
     }
@@ -152,88 +159,124 @@
       requestAnimationFrame(animate);
     }
 
-    var markers = {};
-    var markerColors = {}; // avatarName -> color
+      // Set zoom level to 4.
+      var currentZoomLevel = 4;
 
-    // Set zoom level to 4.
-    var currentZoomLevel = 4;
+      var connection = new signalR.HubConnectionBuilder()
+        .withUrl("/locationHub?token=" + encodeURIComponent(token), { accessTokenFactory: () => token })
+        .build();
 
-    var map = L.map('minimap', {
-      crs: L.CRS.Simple,
-      center: defaultCenter,
-      zoom: currentZoomLevel,
-      minZoom: 1,
-      maxZoom: 10,
-      zoomControl: false,
-      doubleClickZoom: false,
-      dragging: false,
-      scrollWheelZoom: false,
-      keyboard: false,
-      attributionControl: false
-    });
-    L.imageOverlay('map.png', bounds).addTo(map);
-    map.fitBounds(bounds);
-
-    var connection = new signalR.HubConnectionBuilder()
-      .withUrl("/locationHub")
-      .build();
-
-    connection.on("ReceiveLocation", function (avatarName, vpX, vpZ, altitude) {
-      var trueLatLng = convertVPToLeaflet(vpX, vpZ);
-      var pos;
-      if (avatarName === currentUser) {
-        pos = trueLatLng;
-        // Smoothly pan the map on the current user.
-        map.panTo(trueLatLng, { animate: true, duration: 0.5 });
-        if (markers[avatarName]) {
-          markers[avatarName].setLatLng(pos);
-        } else {
-          markerColors[avatarName] = getRandomColor();
-          var icon = createPlayerIcon(avatarName, markerColors[avatarName]);
-          markers[avatarName] = L.marker(pos, { icon: icon }).addTo(map);
+      function handleLocationUpdate(avatarName, vpX, vpZ, altitude) {
+        if (!map || !currentUser) {
+          return;
         }
-      } else {
-        if (map.getBounds().contains(trueLatLng)) {
+        var trueLatLng = convertVPToLeaflet(vpX, vpZ);
+        var pos;
+        if (avatarName === currentUser) {
           pos = trueLatLng;
+          // Smoothly pan the map on the current user.
+          map.panTo(trueLatLng, { animate: true, duration: 0.5 });
+          if (markers[avatarName]) {
+            markers[avatarName].setLatLng(pos);
+          } else {
+            markerColors[avatarName] = getRandomColor();
+            var icon = createPlayerIcon(avatarName, markerColors[avatarName]);
+            markers[avatarName] = L.marker(pos, { icon: icon }).addTo(map);
+          }
         } else {
-          pos = clampToEdgeWithStagger(trueLatLng, map, avatarName);
+          if (map.getBounds().contains(trueLatLng)) {
+            pos = trueLatLng;
+          } else {
+            pos = clampToEdgeWithStagger(trueLatLng, map, avatarName);
+          }
+          markerColors[avatarName] = markerColors[avatarName] || getRandomColor();
+          var icon = createPlayerIcon(avatarName, markerColors[avatarName]);
+          if (markers[avatarName]) {
+            updateMarkerPosition(markers[avatarName], pos, 500);
+            markers[avatarName].setIcon(icon);
+          } else {
+            markers[avatarName] = L.marker(pos, { icon: icon }).addTo(map);
+          }
         }
-        markerColors[avatarName] = markerColors[avatarName] || getRandomColor();
-        var icon = createPlayerIcon(avatarName, markerColors[avatarName]);
+        // Store the true position on the marker.
+        markers[avatarName].myTrueLatLng = trueLatLng;
+      }
+
+      connection.on("AssignAvatar", function (avatarName) {
+        if (!avatarName) {
+          alert("Invalid token. Please reload the overlay.");
+          return;
+        }
+        currentUser = avatarName;
+        initializeMap();
+      });
+
+      connection.on("ReceiveLocationsSnapshot", function (locations) {
+        if (!map || !currentUser || !locations) {
+          return;
+        }
+        locations.forEach(function (location) {
+          handleLocationUpdate(location.avatarName, location.x, location.z, location.altitude);
+        });
+      });
+
+      connection.on("TokenInvalid", function () {
+        alert("Invalid or expired token. Please reload the overlay.");
+        connection.stop();
+      });
+
+      connection.on("ReceiveLocation", function (avatarName, vpX, vpZ, altitude) {
+        handleLocationUpdate(avatarName, vpX, vpZ, altitude);
+      });
+
+      connection.on("RemoveAvatar", function (avatarName) {
+        if (!map) {
+          return;
+        }
         if (markers[avatarName]) {
-          updateMarkerPosition(markers[avatarName], pos, 500);
-          markers[avatarName].setIcon(icon);
-        } else {
-          markers[avatarName] = L.marker(pos, { icon: icon }).addTo(map);
+          map.removeLayer(markers[avatarName]);
+          delete markers[avatarName];
+          delete markerColors[avatarName];
         }
-      }
-      // Store the true position on the marker.
-      markers[avatarName].myTrueLatLng = trueLatLng;
-    });
+      });
 
-    connection.on("RemoveAvatar", function (avatarName) {
-      if (markers[avatarName]) {
-        map.removeLayer(markers[avatarName]);
-        delete markers[avatarName];
-        delete markerColors[avatarName];
-      }
-    });
+      connection.start().catch(function (err) {
+        console.error("SignalR error: ", err.toString());
+      });
 
-    connection.start().catch(function (err) {
-      console.error("SignalR error: ", err.toString());
-    });
+      function initializeMap() {
+        if (map) {
+          return;
+        }
+        map = L.map('minimap', {
+          crs: L.CRS.Simple,
+          center: defaultCenter,
+          zoom: currentZoomLevel,
+          minZoom: 1,
+          maxZoom: 10,
+          zoomControl: false,
+          doubleClickZoom: false,
+          dragging: false,
+          scrollWheelZoom: false,
+          keyboard: false,
+          attributionControl: false
+        });
+        L.imageOverlay('map.png', bounds).addTo(map);
+        map.fitBounds(bounds);
 
-    // On moveend, update off-screen markers.
-    map.on('moveend', function () {
-      var bounds = map.getBounds();
-      for (var avatarName in markers) {
-        if (avatarName === currentUser) continue;
-        var marker = markers[avatarName];
-        var truePos = marker.myTrueLatLng || marker.getLatLng();
-        var newPos = map.getBounds().contains(truePos) ? truePos : clampToEdgeWithStagger(truePos, map, avatarName);
-        updateMarkerPosition(marker, newPos, 500);
+        // On moveend, update off-screen markers.
+        map.on('moveend', function () {
+          var bounds = map.getBounds();
+          for (var avatarName in markers) {
+            if (avatarName === currentUser) continue;
+            var marker = markers[avatarName];
+            var truePos = marker.myTrueLatLng || marker.getLatLng();
+            var newPos = map.getBounds().contains(truePos) ? truePos : clampToEdgeWithStagger(truePos, map, avatarName);
+            updateMarkerPosition(marker, newPos, 500);
+          }
+        });
       }
-    });
+    }
     </script>
 </body>
 </html>
