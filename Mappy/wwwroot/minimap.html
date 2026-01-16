@@ -37,14 +37,39 @@
 <body>
     <div id="minimap"></div>
     <script>
-    // Helper: Read query parameter (e.g., ?user=Tom)
+    // Helper: Read query parameter (e.g., ?token=abc)
     function getQueryParam(name) {
       const params = new URLSearchParams(window.location.search);
       return params.get(name);
     }
-    var currentUser = getQueryParam('user');
-    if (!currentUser) {
-      alert("No user specified. Use the query string, e.g., ?user=Tom");
+    function parseJwtPayload(token) {
+      try {
+        var payload = token.split('.')[1];
+        if (!payload) {
+          return null;
+        }
+        var normalized = payload.replace(/-/g, '+').replace(/_/g, '/');
+        var json = decodeURIComponent(atob(normalized).split('').map(function (c) {
+          return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+        }).join(''));
+        return JSON.parse(json);
+      } catch (err) {
+        console.error("Failed to parse token payload:", err);
+        return null;
+      }
+    }
+
+    var token = getQueryParam('token');
+    var currentUser = null;
+    if (token) {
+      var payload = parseJwtPayload(token);
+      if (payload && payload.name) {
+        currentUser = payload.name;
+      }
+    }
+
+    if (!token) {
+      alert("Missing or invalid token. Please reconnect to get a valid overlay link.");
     }
 
     // Define VP map bounds ([southwest, northeast]) and default center.
@@ -59,6 +84,16 @@
     // Conversion: VP (vpX, vpZ) -> Leaflet ([vpZ, -vpX])
     function convertVPToLeaflet(vpX, vpZ) {
       return [vpZ, -vpX];
+    }
+
+    function isValidLatLng(latLng) {
+      if (!latLng) {
+        return false;
+      }
+      if (Array.isArray(latLng)) {
+        return Number.isFinite(latLng[0]) && Number.isFinite(latLng[1]);
+      }
+      return Number.isFinite(latLng.lat) && Number.isFinite(latLng.lng);
     }
 
     // Basic clamping with stagger: clamps a trueLatLng to near the edge and adds a perpendicular offset.
@@ -120,17 +155,16 @@
       return color;
     }
 
-    // Helper to update a marker smoothly if movement is significant.
+    // Helper to update a marker smoothly.
     function updateMarkerPosition(marker, newLatLng, duration) {
-      // Get container points and compare difference.
-      var currentPt = map.latLngToContainerPoint(marker.getLatLng());
-      var newPt = map.latLngToContainerPoint(newLatLng);
-      var dx = currentPt.x - newPt.x;
-      var dy = currentPt.y - newPt.y;
-      var dist = Math.sqrt(dx*dx + dy*dy);
-      var threshold = 5; // pixels threshold
-      if (dist < threshold) {
-        return; // change is minor; skip update.
+      if (!isValidLatLng(newLatLng)) {
+        console.warn("Skipping invalid marker target:", newLatLng);
+        return;
+      }
+      var currentLatLng = marker.getLatLng();
+      if (!isValidLatLng(currentLatLng)) {
+        console.warn("Skipping marker update with invalid current position:", currentLatLng);
+        return;
       }
       animateMarker(marker, newLatLng, duration);
     }
@@ -175,28 +209,48 @@
     map.fitBounds(bounds);
 
     var connection = new signalR.HubConnectionBuilder()
-      .withUrl("/locationHub")
+      .withUrl("/locationHub", { accessTokenFactory: () => token || "" })
       .build();
 
     connection.on("ReceiveLocation", function (avatarName, vpX, vpZ, altitude) {
-      var trueLatLng = convertVPToLeaflet(vpX, vpZ);
+      var numericX = Number(vpX);
+      var numericZ = Number(vpZ);
+      if (!Number.isFinite(numericX) || !Number.isFinite(numericZ)) {
+        console.warn("Skipping invalid location payload:", avatarName, vpX, vpZ, altitude);
+        return;
+      }
+      var trueLatLng = convertVPToLeaflet(numericX, numericZ);
+      if (!isValidLatLng(trueLatLng)) {
+        console.warn("Skipping invalid converted coordinates:", avatarName, trueLatLng);
+        return;
+      }
       var pos;
       if (avatarName === currentUser) {
         pos = trueLatLng;
         // Smoothly pan the map on the current user.
-        map.panTo(trueLatLng, { animate: true, duration: 0.5 });
+        if (isValidLatLng(trueLatLng)) {
+          map.panTo(trueLatLng, { animate: true, duration: 0.5 });
+        }
         if (markers[avatarName]) {
-          markers[avatarName].setLatLng(pos);
+          if (isValidLatLng(pos)) {
+            markers[avatarName].setLatLng(pos);
+          }
         } else {
           markerColors[avatarName] = getRandomColor();
           var icon = createPlayerIcon(avatarName, markerColors[avatarName]);
-          markers[avatarName] = L.marker(pos, { icon: icon }).addTo(map);
+          if (isValidLatLng(pos)) {
+            markers[avatarName] = L.marker(pos, { icon: icon }).addTo(map);
+          }
         }
       } else {
         if (map.getBounds().contains(trueLatLng)) {
           pos = trueLatLng;
         } else {
           pos = clampToEdgeWithStagger(trueLatLng, map, avatarName);
+        }
+        if (!isValidLatLng(pos)) {
+          console.warn("Skipping invalid marker position:", avatarName, pos);
+          return;
         }
         markerColors[avatarName] = markerColors[avatarName] || getRandomColor();
         var icon = createPlayerIcon(avatarName, markerColors[avatarName]);
@@ -219,9 +273,23 @@
       }
     });
 
-    connection.start().catch(function (err) {
-      console.error("SignalR error: ", err.toString());
-    });
+    if (token) {
+      connection.start()
+        .then(function () {
+          return connection.invoke("GetCurrentUser");
+        })
+        .then(function (serverUser) {
+          if (serverUser) {
+            currentUser = serverUser;
+          } else if (!currentUser) {
+            alert("Missing or invalid token. Please reconnect to get a valid overlay link.");
+          }
+        })
+        .catch(function (err) {
+          console.error("SignalR error: ", err.toString());
+          alert("Missing or invalid token. Please reconnect to get a valid overlay link.");
+        });
+    }
 
     // On moveend, update off-screen markers.
     map.on('moveend', function () {

@@ -4,6 +4,20 @@ namespace Mappy.Hubs
 {
     public class LocationHub : Hub
     {
-        // Additional hub methods can be added here if necessary.
+        public override Task OnConnectedAsync()
+        {
+            if (Context.User?.Identity?.IsAuthenticated != true)
+            {
+                Context.Abort();
+                return Task.CompletedTask;
+            }
+
+            return base.OnConnectedAsync();
+        }
+
+        public string? GetCurrentUser()
+        {
+            return Context.User?.Identity?.Name;
+        }
     }
 }

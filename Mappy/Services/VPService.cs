@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Extensions.Hosting;
+using Mappy.Services;
 using VpNet;
 using Mappy.Hubs;
 
@@ -15,13 +16,15 @@ namespace Mappy
         private VirtualParadiseClient _client;
         private Timer _pollTimer;
         private readonly IHubContext<LocationHub> _hubContext;
+        private readonly OverlayTokenService _overlayTokenService;
         // Store names of avatars that are ghosted.
         private readonly HashSet<string> _ghostedAvatars = new HashSet<string>();
 
-        public VPService(IHubContext<LocationHub> hubContext)
+        public VPService(IHubContext<LocationHub> hubContext, OverlayTokenService overlayTokenService)
         {
             _client = new VirtualParadiseClient();
             _hubContext = hubContext;
+            _overlayTokenService = overlayTokenService;
         }
 
         public async Task StartAsync(CancellationToken cancellationToken)
@@ -49,7 +52,11 @@ namespace Mappy
 
             _client.AvatarEntered += async (sender, e) =>
             {
-                _client.UrlSendOverlay(e.Avatar, "https://ayo.thruhere.net/minimap.html?user=" + e.Avatar.Name);
+                var token = _overlayTokenService.CreateToken(e.Avatar.Name);
+                var encodedToken = Uri.EscapeDataString(token);
+                var overlayUrl = $"https://ayo.thruhere.net/minimap.html?token={encodedToken}";
+                Console.WriteLine($"[Overlay URL] {e.Avatar.Name}: {overlayUrl}");
+                _client.UrlSendOverlay(e.Avatar, overlayUrl);
             };
             // Subscribe to chat messages for ghost/unghost commands.
             _client.ChatMessageReceived += async (sender, e) =>
@@ -114,6 +121,11 @@ namespace Mappy
                     // Get up-to-date position using the session id.
                     var avQuery = _client.GetAvatar(avatar.Session);
                     var pos = avQuery.Location.Position;
+                    if (!double.IsFinite(pos.X) || !double.IsFinite(pos.Y) || !double.IsFinite(pos.Z))
+                    {
+                        Console.WriteLine($"[Invalid Position] {avatar.Name}: ({pos.X}, {pos.Y}, {pos.Z})");
+                        continue;
+                    }
                     Console.WriteLine($"  {avatar.Name} (Session: {avatar.Session}): ({pos.X:F2}, {pos.Y:F2}, {pos.Z:F2})");
 
                     // Broadcast the update to connected SignalR clients.
