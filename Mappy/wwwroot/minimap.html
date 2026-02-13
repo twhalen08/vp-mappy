@@ -1,14 +1,17 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html>
 <head>
-    <title>GTA‑Style Minimap HUD with Stable Off‑Edge Markers</title>
+    <title>GTA-Style Minimap HUD</title>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <!-- Leaflet CSS & JS -->
+
+    <!-- Leaflet -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <!-- SignalR JS -->
+
+    <!-- SignalR -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/7.0.4/signalr.min.js"></script>
+
     <style>
         html, body {
             margin: 0;
@@ -16,224 +19,612 @@
             height: 100%;
             overflow: hidden;
             background: transparent;
+            font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
         }
-        /* Minimap container */
-        #minimap {
+
+        /* ===== Minimap (circular) ===== */
+        #minimap-wrap {
             position: absolute;
             top: 10px;
             left: 10px;
-            width: 200px;
-            height: 200px;
-            border: 2px solid #fff;
+            width: 220px;
+            height: 220px; /* includes frame */
             z-index: 1001;
-            cursor: pointer;
+            pointer-events: none; /* let Leaflet get events via inner element */
         }
 
-        .custom-player-icon div {
+        #minimap {
+            position: absolute;
+            inset: 10px; /* frame thickness */
+            width: 200px;
+            height: 200px;
+            border-radius: 50%;
+            overflow: hidden;
+            box-shadow: 0 6px 18px rgba(0,0,0,.35);
+            pointer-events: auto; /* re-enable inside */
+            background: transparent;
+        }
+        /* White rim */
+        #minimap-wrap::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            border-radius: 50%;
+            border: 2px solid rgba(255,255,255,.95);
+            box-shadow: 0 0 0 1px rgba(0,0,0,.25) inset;
+        }
+
+        /* Remove Leaflet chrome we don’t want */
+        .leaflet-container {
+            background: transparent;
+        }
+
+        .leaflet-control-container {
+            display: none;
+        }
+
+        .leaflet-pane .leaflet-marker-icon {
+            will-change: transform;
+        }
+
+        /* ===== Player chips ===== */
+        .chip {
+            position: relative;
+            width: var(--chip);
+            height: var(--chip);
+            line-height: var(--chip);
+            border-radius: 50%;
+            text-align: center;
+            font-weight: 700;
+            color: #fff;
+            border: 2px solid #fff;
             text-shadow: 0 0 2px #000;
+            box-shadow: 0 2px 6px rgba(0,0,0,.35);
+            user-select: none;
+        }
+            /* Make self pop */
+            .chip.self {
+                box-shadow: 0 0 0 2px #00d1ff, 0 2px 6px rgba(0,0,0,.35);
+            }
+
+            /* Off-map edge chip styling (slightly smaller, stronger outline) */
+            .chip.edge {
+                transform: scale(.9);
+                border-width: 2px;
+                box-shadow: 0 0 0 2px rgba(255,255,255,.6), 0 2px 6px rgba(0,0,0,.45);
+            }
+
+            /* Direction wedge (points toward true offscreen location) */
+            .chip::after {
+                content: "";
+                position: absolute;
+                left: 50%;
+                top: -6px;
+                width: 0;
+                height: 0;
+                border-left: 6px solid transparent;
+                border-right: 6px solid transparent;
+                border-bottom: 8px solid #fff;
+                transform: translateX(-50%) rotate(var(--wedge, 0deg));
+                filter: drop-shadow(0 0 2px rgba(0,0,0,.5));
+                opacity: var(--wedgeAlpha, .0); /* visible only when clamped */
+                mix-blend-mode: normal;
+            }
+
+        .chip-inner {
+            width: 100%;
+            height: 100%;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--bg, #6c5ce7);
+        }
+
+        /* ===== Toolbar (bottom-right) ===== */
+        #toolbar {
+            position: fixed;
+            right: 14px;
+            bottom: 14px;
+            z-index: 1500;
+            display: flex;
+            gap: 10px;
+        }
+
+        .tool-btn {
+            width: 44px;
+            height: 44px;
+            border-radius: 12px;
+            background: rgba(255,255,255,.14);
+            display: grid;
+            place-items: center;
+            border: 1px solid rgba(255,255,255,.35);
+            box-shadow: 0 4px 12px rgba(0,0,0,.35);
+            cursor: pointer;
+            -webkit-tap-highlight-color: transparent;
+            transition: transform .08s ease, background .15s ease;
+            backdrop-filter: blur(6px);
+        }
+
+            .tool-btn:hover {
+                transform: translateY(-1px);
+                background: rgba(255,255,255,.18);
+            }
+
+            .tool-btn svg {
+                width: 24px;
+                height: 24px;
+                fill: #fff;
+                opacity: .9;
+            }
+
+        /* ===== Settings panel ===== */
+        #settings {
+            position: fixed;
+            right: 14px;
+            bottom: 70px;
+            z-index: 1500;
+            width: 260px;
+            padding: 10px;
+            border-radius: 14px;
+            background: rgba(20,20,24,.8);
+            border: 1px solid rgba(255,255,255,.2);
+            color: #fff;
+            box-shadow: 0 10px 24px rgba(0,0,0,.5);
+            backdrop-filter: blur(8px);
+            display: none;
+        }
+
+            #settings h3 {
+                margin: 6px 6px 10px;
+                font-size: 14px;
+                font-weight: 700;
+                letter-spacing: .2px;
+                opacity: .9;
+            }
+
+        .row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 6px 6px;
+        }
+
+            .row label {
+                font-size: 13px;
+                opacity: .9;
+            }
+
+            .row input {
+                width: 110px;
+            }
+
+        .settings-actions {
+            display: flex;
+            gap: 8px;
+            justify-content: flex-end;
+            padding: 8px 6px 2px;
+        }
+
+        .pill {
+            padding: 6px 10px;
+            border-radius: 10px;
+            font-size: 12px;
+            cursor: pointer;
+            background: rgba(255,255,255,.14);
+            border: 1px solid rgba(255,255,255,.25);
+        }
+
+            .pill:hover {
+                background: rgba(255,255,255,.2);
+            }
+
+        /* Hidden state */
+        .is-hidden #minimap-wrap {
+            display: none;
+        }
+
+        /* ===== Debug badge ===== */
+        #dbg {
+            position: fixed;
+            left: 12px;
+            bottom: 12px;
+            z-index: 2000;
+            font: 12px/1.25 system-ui, sans-serif;
+            color: #fff;
+            background: rgba(0,0,0,.45);
+            padding: 6px 8px;
+            border-radius: 8px;
+            border: 1px solid rgba(255,255,255,.25)
         }
     </style>
 </head>
 <body>
-    <div id="minimap"></div>
+
+    <!-- Circular minimap frame + masked Leaflet map -->
+    <div id="minimap-wrap">
+        <div id="minimap"></div>
+    </div>
+
+    <!-- HUD Toolbar (always visible) -->
+    <div id="toolbar">
+        <!-- Eye -->
+        <button id="btn-eye" class="tool-btn" title="Show/Hide HUD (H)">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5C21.27 7.61 17 4.5 12 4.5Zm0 12.5a5 5 0 1 1 0-10 5 5 0 0 1 0 10Z" />
+            </svg>
+        </button>
+
+        <!-- Settings -->
+        <button id="btn-settings" class="tool-btn" title="Settings">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M19.14 12.94a7.6 7.6 0 0 0 .05-.94 7.6 7.6 0 0 0-.05-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.6-.22l-2.39.96a7.44 7.44 0 0 0-1.63-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54c-.57.23-1.11.53-1.63.94l-2.39-.96a.5.5 0 0 0-.6.22L2.71 8.84a.5.5 0 0 0 .12.64l2.03 1.58c-.03.31-.05.63-.05.94s.02.63.05.94L2.83 14.5a.5.5 0 0 0-.12.64l1.92 3.32c.14.24.43.34.69.22l2.39-.96c.51.41 1.06.74 1.63.97l.36 2.54a.5.5 0 0 0 .5.42h3.84a.5.5 0 0 0 .5-.42l.36-2.54c.57-.23 1.11-.56 1.63-.97l2.39.96c.26.12.55.02.69-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.03-1.56ZM12 15.5A3.5 3.5 0 1 1 12 8.5a3.5 3.5 0 0 1 0 7Z" />
+            </svg>
+        </button>
+    </div>
+
+    <!-- Settings panel -->
+    <div id="settings" role="dialog" aria-modal="false" aria-label="Minimap settings">
+        <h3>Minimap Settings</h3>
+        <div class="row">
+            <label for="zoom">Zoom</label>
+            <input id="zoom" type="range" min="1" max="10" step="1">
+        </div>
+        <div class="row">
+            <label for="markerSize">Marker size</label>
+            <input id="markerSize" type="range" min="18" max="44" step="1">
+        </div>
+        <div class="row">
+            <label for="clampMargin">Clamp margin (px)</label>
+            <input id="clampMargin" type="range" min="8" max="40" step="1">
+        </div>
+        <div class="settings-actions">
+            <button id="reset" class="pill">Reset</button>
+            <button id="closeSettings" class="pill">Close</button>
+        </div>
+    </div>
+
+    <!-- Debug badge -->
+    <div id="dbg">hub: <b>init</b> · last: – · recv: 0</div>
+
     <script>
-    // Helper: Read query parameter (e.g., ?user=Tom)
-    function getQueryParam(name) {
-      const params = new URLSearchParams(window.location.search);
-      return params.get(name);
-    }
-    var currentUser = getQueryParam('user');
-    if (!currentUser) {
-      alert("No user specified. Use the query string, e.g., ?user=Tom");
-    }
-
-    // Define VP map bounds ([southwest, northeast]) and default center.
-    var bounds = [
-      [-839.6827034622862, -622.9113488478993],
-      [678.8500251189461, 572.6134629922306]
-    ];
-    var centerY = (-839.6827034622862 + 678.8500251189461) / 2;
-    var centerX = (-622.9113488478993 + 572.6134629922306) / 2;
-    var defaultCenter = [centerY, centerX];
-
-    // Conversion: VP (vpX, vpZ) -> Leaflet ([vpZ, -vpX])
-    function convertVPToLeaflet(vpX, vpZ) {
-      return [vpZ, -vpX];
-    }
-
-    // Basic clamping with stagger: clamps a trueLatLng to near the edge and adds a perpendicular offset.
-    function clampToEdgeWithStagger(trueLatLng, map, avatarName) {
-      var margin = 15; // margin in pixels
-      var containerPoint = map.latLngToContainerPoint(trueLatLng);
-      var size = map.getSize();
-      var clampedX = Math.min(Math.max(containerPoint.x, margin), size.x - margin);
-      var clampedY = Math.min(Math.max(containerPoint.y, margin), size.y - margin);
-      var clampedPoint = L.point(clampedX, clampedY);
-      var mapCenterPoint = L.point(size.x / 2, size.y / 2);
-      var dx = clampedPoint.x - mapCenterPoint.x;
-      var dy = clampedPoint.y - mapCenterPoint.y;
-      var perp = L.point(-dy, dx);
-      var mag = Math.sqrt(perp.x * perp.x + perp.y * perp.y);
-      if (mag > 0) {
-        perp.x /= mag;
-        perp.y /= mag;
-      }
-      var hash = 0;
-      for (var i = 0; i < avatarName.length; i++) {
-        hash += avatarName.charCodeAt(i);
-      }
-      var offsetMultiplier = (hash % 3) - 1;
-      var offsetPixels = 10 * offsetMultiplier;
-      var offsetPoint = L.point(clampedPoint.x + perp.x * offsetPixels,
-                                 clampedPoint.y + perp.y * offsetPixels);
-      return map.containerPointToLatLng(offsetPoint);
-    }
-
-    // Create custom div icon for a player.
-    function createPlayerIcon(avatarName, color) {
-      var firstLetter = avatarName.charAt(0).toUpperCase();
-      return L.divIcon({
-        className: 'custom-player-icon',
-        html: `<div style="
-            background-color: ${color};
-            width: 30px;
-            height: 30px;
-            line-height: 30px;
-            border-radius: 50%;
-            text-align: center;
-            color: #fff;
-            font-weight: bold;
-            border: 2px solid #fff;">
-              ${firstLetter}
-          </div>`,
-        iconSize: [30, 30],
-        iconAnchor: [15, 15]
-      });
-    }
-
-    function getRandomColor() {
-      var letters = '0123456789ABCDEF';
-      var color = '#';
-      for (var i = 0; i < 6; i++) {
-        color += letters[Math.floor(Math.random() * 16)];
-      }
-      return color;
-    }
-
-    // Helper to update a marker smoothly if movement is significant.
-    function updateMarkerPosition(marker, newLatLng, duration) {
-      // Get container points and compare difference.
-      var currentPt = map.latLngToContainerPoint(marker.getLatLng());
-      var newPt = map.latLngToContainerPoint(newLatLng);
-      var dx = currentPt.x - newPt.x;
-      var dy = currentPt.y - newPt.y;
-      var dist = Math.sqrt(dx*dx + dy*dy);
-      var threshold = 5; // pixels threshold
-      if (dist < threshold) {
-        return; // change is minor; skip update.
-      }
-      animateMarker(marker, newLatLng, duration);
-    }
-
-    // Animate marker movement over a given duration.
-    function animateMarker(marker, targetLatLng, duration) {
-      duration = duration || 500;
-      var startTime = performance.now();
-      var initialLatLng = marker.getLatLng();
-      function animate(time) {
-        var progress = Math.min((time - startTime) / duration, 1);
-        var newLat = initialLatLng.lat + (targetLatLng.lat - initialLatLng.lat) * progress;
-        var newLng = initialLatLng.lng + (targetLatLng.lng - initialLatLng.lng) * progress;
-        marker.setLatLng([newLat, newLng]);
-        if (progress < 1) {
-          requestAnimationFrame(animate);
+        // ========= Util & persistence =========
+        function getQueryParam(name) {
+            const params = new URLSearchParams(window.location.search);
+            return params.get(name);
         }
-      }
-      requestAnimationFrame(animate);
-    }
+        const currentUser = getQueryParam('user') || "";
 
-    var markers = {};
-    var markerColors = {}; // avatarName -> color
+        const store = {
+            get(key, fallback) { try { const v = localStorage.getItem(key); return v === null ? fallback : JSON.parse(v); } catch { return fallback; } },
+            set(key, value) { localStorage.setItem(key, JSON.stringify(value)); }
+        };
 
-    // Set zoom level to 4.
-    var currentZoomLevel = 4;
+        const defaults = { hudVisible: true, zoom: 4, markerSize: 30, clampMargin: 15 };
+        const settings = {
+            hudVisible: store.get('hudVisible', defaults.hudVisible),
+            zoom: store.get('zoom', defaults.zoom),
+            markerSize: store.get('markerSize', defaults.markerSize),
+            clampMargin: store.get('clampMargin', defaults.clampMargin),
+        };
+        if (!settings.hudVisible) { document.body.classList.add('is-hidden'); }
 
-    var map = L.map('minimap', {
-      crs: L.CRS.Simple,
-      center: defaultCenter,
-      zoom: currentZoomLevel,
-      minZoom: 1,
-      maxZoom: 10,
-      zoomControl: false,
-      doubleClickZoom: false,
-      dragging: false,
-      scrollWheelZoom: false,
-      keyboard: false,
-      attributionControl: false
-    });
-    L.imageOverlay('map.png', bounds).addTo(map);
-    map.fitBounds(bounds);
+        // ========= Map bounds and conversion =========
+        const bounds = [
+            [-839.6827034622862, -622.9113488478993],
+            [678.8500251189461, 572.6134629922306]
+        ];
+        const centerY = (bounds[0][0] + bounds[1][0]) / 2;
+        const centerX = (bounds[0][1] + bounds[1][1]) / 2;
+        const defaultCenter = [centerY, centerX];
 
-    var connection = new signalR.HubConnectionBuilder()
-      .withUrl("/locationHub")
-      .build();
+        // VP (vpX, vpZ) -> Leaflet ([vpZ, -vpX])
+        function convertVPToLeaflet(vpX, vpZ) { return [vpZ, -vpX]; }
 
-    connection.on("ReceiveLocation", function (avatarName, vpX, vpZ, altitude) {
-      var trueLatLng = convertVPToLeaflet(vpX, vpZ);
-      var pos;
-      if (avatarName === currentUser) {
-        pos = trueLatLng;
-        // Smoothly pan the map on the current user.
-        map.panTo(trueLatLng, { animate: true, duration: 0.5 });
-        if (markers[avatarName]) {
-          markers[avatarName].setLatLng(pos);
-        } else {
-          markerColors[avatarName] = getRandomColor();
-          var icon = createPlayerIcon(avatarName, markerColors[avatarName]);
-          markers[avatarName] = L.marker(pos, { icon: icon }).addTo(map);
+        // ========= Leaflet init =========
+        const map = L.map('minimap', {
+            crs: L.CRS.Simple,
+            center: defaultCenter,
+            zoom: settings.zoom,
+            minZoom: 1, maxZoom: 10,
+            zoomControl: false, doubleClickZoom: false,
+            dragging: false, scrollWheelZoom: false, keyboard: false,
+            attributionControl: false
+        });
+        L.imageOverlay('map.png', bounds).addTo(map);
+        map.fitBounds(bounds);
+        setTimeout(() => { map.invalidateSize(); }, 50);
+
+        // set UI chip size CSS var
+        const root = document.documentElement;
+        function applyMarkerSize(px) { root.style.setProperty('--chip', px + 'px'); }
+        applyMarkerSize(settings.markerSize);
+
+        // ========= Toolbar actions =========
+        const btnEye = document.getElementById('btn-eye');
+        const btnSettings = document.getElementById('btn-settings');
+        const settingsPanel = document.getElementById('settings');
+        const inputZoom = document.getElementById('zoom');
+        const inputMarkerSize = document.getElementById('markerSize');
+        const inputClampMargin = document.getElementById('clampMargin');
+        const btnReset = document.getElementById('reset');
+        const btnCloseSettings = document.getElementById('closeSettings');
+
+        inputZoom.value = settings.zoom;
+        inputMarkerSize.value = settings.markerSize;
+        inputClampMargin.value = settings.clampMargin;
+
+        function setHudVisible(v) {
+            settings.hudVisible = v;
+            store.set('hudVisible', v);
+            document.body.classList.toggle('is-hidden', !v);
         }
-      } else {
-        if (map.getBounds().contains(trueLatLng)) {
-          pos = trueLatLng;
-        } else {
-          pos = clampToEdgeWithStagger(trueLatLng, map, avatarName);
+        btnEye.addEventListener('click', () => setHudVisible(!settings.hudVisible));
+        document.addEventListener('keydown', (e) => { if (e.key.toLowerCase() === 'h') { setHudVisible(!settings.hudVisible); } });
+
+        btnSettings.addEventListener('click', () => {
+            settingsPanel.style.display = (settingsPanel.style.display === 'block' ? 'none' : 'block');
+        });
+        btnCloseSettings.addEventListener('click', () => settingsPanel.style.display = 'none');
+
+        inputZoom.addEventListener('input', () => {
+            const z = Number(inputZoom.value);
+            settings.zoom = z; store.set('zoom', z);
+            map.setZoom(z);
+            refreshClampedMarkers();
+        });
+
+        inputMarkerSize.addEventListener('input', () => {
+            const px = Number(inputMarkerSize.value);
+            settings.markerSize = px; store.set('markerSize', px);
+            applyMarkerSize(px);
+            for (const name in markers) {
+                const mk = markers[name];
+                const color = markerColors[name] || '#888';
+                const data = mk._wedgeData || { deg: 0, vis: false, self: false, edge: false };
+                mk.setIcon(makeIcon(name, color, data.deg, data.vis, data.self, data.edge));
+            }
+        });
+
+        inputClampMargin.addEventListener('input', () => {
+            const v = Number(inputClampMargin.value);
+            settings.clampMargin = v; store.set('clampMargin', v);
+            refreshClampedMarkers();
+        });
+
+        btnReset.addEventListener('click', () => {
+            inputZoom.value = defaults.zoom; inputMarkerSize.value = defaults.markerSize; inputClampMargin.value = defaults.clampMargin;
+            inputZoom.dispatchEvent(new Event('input'));
+            inputMarkerSize.dispatchEvent(new Event('input'));
+            inputClampMargin.dispatchEvent(new Event('input'));
+        });
+
+        // ========= Helpers =========
+        function namesEqual(a, b) {
+            if (!a || !b) return false;
+            return a.trim().toLowerCase() === b.trim().toLowerCase();
         }
-        markerColors[avatarName] = markerColors[avatarName] || getRandomColor();
-        var icon = createPlayerIcon(avatarName, markerColors[avatarName]);
-        if (markers[avatarName]) {
-          updateMarkerPosition(markers[avatarName], pos, 500);
-          markers[avatarName].setIcon(icon);
-        } else {
-          markers[avatarName] = L.marker(pos, { icon: icon }).addTo(map);
+        function randColor() { return '#' + Math.floor(Math.random() * 0xFFFFFF).toString(16).padStart(6, '0'); }
+
+        function createChipHTML(name, color, wedgeDeg = 0, showWedge = false, isSelf = false, isEdge = false) {
+            const letter = (name || '?').charAt(0).toUpperCase();
+            const wedgeAlpha = showWedge ? '.95' : '0';
+            const classes = ['chip'];
+            if (isSelf) classes.push('self');
+            if (isEdge) classes.push('edge');
+            return `
+          <div class="${classes.join(' ')}" style="--bg:${color}; --wedge:${wedgeDeg}deg; --wedgeAlpha:${wedgeAlpha}">
+            <div class="chip-inner">${letter}</div>
+          </div>
+        `;
         }
-      }
-      // Store the true position on the marker.
-      markers[avatarName].myTrueLatLng = trueLatLng;
-    });
 
-    connection.on("RemoveAvatar", function (avatarName) {
-      if (markers[avatarName]) {
-        map.removeLayer(markers[avatarName]);
-        delete markers[avatarName];
-        delete markerColors[avatarName];
-      }
-    });
+        function makeIcon(name, color, wedgeDeg = 0, showWedge = false, isSelf = false, isEdge = false) {
+            return L.divIcon({
+                className: '',
+                html: createChipHTML(name, color, wedgeDeg, showWedge, isSelf, isEdge),
+                iconSize: [settings.markerSize, settings.markerSize],
+                iconAnchor: [settings.markerSize / 2, settings.markerSize / 2]
+            });
+        }
 
-    connection.start().catch(function (err) {
-      console.error("SignalR error: ", err.toString());
-    });
+        // Bearing from A to B in degrees (screen-up baseline)
+        function bearing(fromLatLng, toLatLng) {
+            const dx = toLatLng.lng - fromLatLng.lng;
+            const dy = toLatLng.lat - fromLatLng.lat;
+            const rad = Math.atan2(dx, -dy); // screen-up is -Y
+            let deg = rad * (180 / Math.PI);
+            if (deg < 0) deg += 360;
+            return deg;
+        }
 
-    // On moveend, update off-screen markers.
-    map.on('moveend', function () {
-      var bounds = map.getBounds();
-      for (var avatarName in markers) {
-        if (avatarName === currentUser) continue;
-        var marker = markers[avatarName];
-        var truePos = marker.myTrueLatLng || marker.getLatLng();
-        var newPos = map.getBounds().contains(truePos) ? truePos : clampToEdgeWithStagger(truePos, map, avatarName);
-        updateMarkerPosition(marker, newPos, 500);
-      }
-    });
+        // === NEW: Circle-clamp to the minimap rim (GTA-style edge chips) ===
+        // Returns [latLng, wedgeDeg, showWedge, isEdge]
+        function clampToCircleWithWedge(trueLatLng, map, name) {
+            const margin = settings.clampMargin;     // inner padding from rim
+            const size = map.getSize();
+            const centerPt = L.point(size.x / 2, size.y / 2);
+            const targetPt = map.latLngToContainerPoint(trueLatLng);
+
+            // Vector from center to target
+            let vx = targetPt.x - centerPt.x;
+            let vy = targetPt.y - centerPt.y;
+            const dist = Math.hypot(vx, vy);
+
+            // Circle radius = half of the map box; keep a margin
+            const radius = Math.min(size.x, size.y) / 2 - margin;
+
+            // If already inside circle radius, just return true pos (not edge)
+            if (dist <= radius) {
+                const wedgeDeg = bearing(map.containerPointToLatLng(centerPt), trueLatLng);
+                return [trueLatLng, wedgeDeg, false, false];
+            }
+
+            // Clamp point to the circle along the ray
+            const scale = radius / dist;
+            let edgeX = centerPt.x + vx * scale;
+            let edgeY = centerPt.y + vy * scale;
+
+            // Tiny tangent stagger to reduce overlap
+            // Tangent vector = (-vy, vx) normalized
+            let tx = -vy, ty = vx;
+            const tmag = Math.hypot(tx, ty) || 1;
+            tx /= tmag; ty /= tmag;
+
+            // Name-based stagger of -1,0,1 * 8px
+            let hash = 0; for (let i = 0; i < name.length; i++) hash += name.charCodeAt(i);
+            const offset = ((hash % 3) - 1) * 8;
+            edgeX += tx * offset; edgeY += ty * offset;
+
+            const clampedLL = map.containerPointToLatLng(L.point(edgeX, edgeY));
+            const wedgeDeg = bearing(clampedLL, trueLatLng);
+            return [clampedLL, wedgeDeg, true, true];
+        }
+
+        function updateMarkerPosition(marker, newLatLng, duration) {
+            const currentPt = map.latLngToContainerPoint(marker.getLatLng());
+            const newPt = map.latLngToContainerPoint(newLatLng);
+            const dist = Math.hypot(currentPt.x - newPt.x, currentPt.y - newPt.y);
+            if (dist < 5) return;
+            animateMarker(marker, newLatLng, duration);
+        }
+        function animateMarker(marker, targetLatLng, duration = 500) {
+            const start = performance.now();
+            const startLL = marker.getLatLng();
+            function step(t) {
+                const p = Math.min((t - start) / duration, 1);
+                const lat = startLL.lat + (targetLatLng.lat - startLL.lat) * p;
+                const lng = startLL.lng + (targetLatLng.lng - startLL.lng) * p;
+                marker.setLatLng([lat, lng]);
+                if (p < 1) requestAnimationFrame(step);
+            }
+            requestAnimationFrame(step);
+        }
+
+        // ========= Markers & refresh =========
+        const markers = {};        // name -> L.Marker
+        const markerColors = {};   // name -> color
+
+        function refreshClampedMarkers() {
+            const b = map.getBounds();
+            for (const name in markers) {
+                const mk = markers[name];
+                const trueLL = mk.myTrueLatLng || mk.getLatLng();
+                const isSelf = namesEqual(name, currentUser);
+
+                let pos = trueLL, wedge = 0, wedgeVis = false, isEdge = false;
+                if (!isSelf && !b.contains(trueLL)) {
+                    const r = clampToCircleWithWedge(trueLL, map, name);
+                    pos = r[0]; wedge = r[1]; wedgeVis = r[2]; isEdge = r[3];
+                }
+                updateMarkerPosition(mk, pos, 250);
+                const color = markerColors[name] || '#888';
+                mk.setIcon(makeIcon(name, color, wedge, wedgeVis, isSelf, isEdge));
+                mk._wedgeData = { deg: wedge, vis: wedgeVis, self: isSelf, edge: isEdge };
+            }
+        }
+
+        // ========= Debug HUD helpers =========
+        const dbg = document.getElementById('dbg');
+        let recvCount = 0;
+        function setDbg(status) {
+            dbg.innerHTML = `hub: <b>${status}</b> · last: ${new Date().toLocaleTimeString()} · recv: ${recvCount}`;
+        }
+
+        // ========= Teleport snap threshold (px) =========
+        const TELEPORT_PX = 120;
+
+        // ========= SignalR (auto-reconnect) =========
+        const connection = new signalR.HubConnectionBuilder()
+            .withUrl("/locationHub")
+            .withAutomaticReconnect({
+                nextRetryDelayInMilliseconds: ctx => Math.min(1000 * Math.pow(2, ctx.previousRetryCount), 15000)
+            })
+            .build();
+
+        connection.onreconnecting(() => setDbg('reconnecting'));
+        connection.onreconnected(() => setDbg('reconnected'));
+        connection.onclose(err => { console.warn('SignalR closed', err); setDbg('closed'); });
+
+        // Main location handler — self hard-updates; others tween; off-map chips ride the rim
+        connection.on("ReceiveLocation", (avatarName, vpX, vpZ, altitude) => {
+            recvCount++;
+            setDbg('ok');
+
+            const trueLatLng = convertVPToLeaflet(vpX, vpZ);
+            const isMe = namesEqual(avatarName, currentUser);
+
+            if (!markerColors[avatarName]) markerColors[avatarName] = randColor();
+            const color = markerColors[avatarName];
+
+            // ensure marker exists
+            if (!markers[avatarName]) {
+                markers[avatarName] = L.marker(trueLatLng, {
+                    icon: makeIcon(avatarName, color, 0, false, isMe, false),
+                    zIndexOffset: isMe ? 1000 : 0
+                }).addTo(map);
+            }
+
+            markers[avatarName].myTrueLatLng = trueLatLng;
+
+            if (isMe) {
+                // Teleport vs move
+                const had = markers[avatarName]._hadSelf || false;
+                let jumpPx = 0;
+                if (had) {
+                    const old = map.latLngToContainerPoint(markers[avatarName].getLatLng());
+                    const now = map.latLngToContainerPoint(trueLatLng);
+                    jumpPx = Math.hypot(now.x - old.x, now.y - old.y);
+                }
+                markers[avatarName]._hadSelf = true;
+
+                // hard-update YOUR marker position every tick (no tween)
+                markers[avatarName].setLatLng(trueLatLng);
+                markers[avatarName].setIcon(makeIcon(avatarName, color, 0, false, true, false));
+                markers[avatarName]._wedgeData = { deg: 0, vis: false, self: true, edge: false };
+
+                // center map — snap on big jump, pan otherwise
+                if (!had || jumpPx >= TELEPORT_PX) {
+                    map.setView(trueLatLng, map.getZoom(), { animate: false });
+                } else {
+                    map.panTo(trueLatLng, { animate: true, duration: 0.5 });
+                }
+            } else {
+                // Others: if off-map, clamp to circle rim w/ wedge; else true pos
+                const inView = map.getBounds().contains(trueLatLng);
+                let pos = trueLatLng, wedge = 0, wedgeVis = false, isEdge = false;
+                if (!inView) {
+                    const r = clampToCircleWithWedge(trueLatLng, map, avatarName);
+                    pos = r[0]; wedge = r[1]; wedgeVis = r[2]; isEdge = r[3];
+                }
+                updateMarkerPosition(markers[avatarName], pos, 500);
+                markers[avatarName].setIcon(makeIcon(avatarName, color, wedge, wedgeVis, false, isEdge));
+                markers[avatarName]._wedgeData = { deg: wedge, vis: wedgeVis, self: false, edge: isEdge };
+            }
+        });
+
+        connection.on("RemoveAvatar", (avatarName) => {
+            if (markers[avatarName]) {
+                map.removeLayer(markers[avatarName]);
+                delete markers[avatarName];
+                delete markerColors[avatarName];
+            }
+        });
+
+        (async () => {
+            try {
+                await connection.start();
+                setDbg('connected');
+                console.log('[HUD] SignalR connected');
+            } catch (e) {
+                setDbg('failed');
+                console.error('[HUD] SignalR failed', e);
+            }
+        })();
+
+        // Re-clamp after map pans/zooms (e.g., following the player)
+        map.on('moveend', refreshClampedMarkers);
     </script>
 </body>
 </html>
