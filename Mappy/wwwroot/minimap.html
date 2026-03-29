@@ -322,6 +322,17 @@
         // VP (vpX, vpZ) -> Leaflet ([vpZ, -vpX])
         function convertVPToLeaflet(vpX, vpZ) { return [vpZ, -vpX]; }
 
+        function isFiniteNumber(v) { return Number.isFinite(v); }
+        function toLeafletLatLng(vpX, vpZ) {
+            const x = Number(vpX);
+            const z = Number(vpZ);
+            if (!isFiniteNumber(x) || !isFiniteNumber(z)) return null;
+            return L.latLng(z, -x);
+        }
+        function isFiniteLatLng(latLng) {
+            return !!latLng && isFiniteNumber(latLng.lat) && isFiniteNumber(latLng.lng);
+        }
+
         // ========= Leaflet init =========
         const map = L.map('minimap', {
             crs: L.CRS.Simple,
@@ -483,19 +494,23 @@
         }
 
         function updateMarkerPosition(marker, newLatLng, duration) {
+            if (!marker || !isFiniteLatLng(newLatLng)) return;
             const currentPt = map.latLngToContainerPoint(marker.getLatLng());
             const newPt = map.latLngToContainerPoint(newLatLng);
             const dist = Math.hypot(currentPt.x - newPt.x, currentPt.y - newPt.y);
-            if (dist < 5) return;
+            // Keep a tiny deadband only; larger values can make remote avatars look frozen.
+            if (dist < 1) return;
             animateMarker(marker, newLatLng, duration);
         }
         function animateMarker(marker, targetLatLng, duration = 500) {
             const start = performance.now();
             const startLL = marker.getLatLng();
+            if (!isFiniteLatLng(startLL) || !isFiniteLatLng(targetLatLng)) return;
             function step(t) {
                 const p = Math.min((t - start) / duration, 1);
                 const lat = startLL.lat + (targetLatLng.lat - startLL.lat) * p;
                 const lng = startLL.lng + (targetLatLng.lng - startLL.lng) * p;
+                if (!isFiniteNumber(lat) || !isFiniteNumber(lng)) return;
                 marker.setLatLng([lat, lng]);
                 if (p < 1) requestAnimationFrame(step);
             }
@@ -552,7 +567,11 @@
             recvCount++;
             setDbg('ok');
 
-            const trueLatLng = convertVPToLeaflet(vpX, vpZ);
+            const trueLatLng = toLeafletLatLng(vpX, vpZ);
+            if (!isFiniteLatLng(trueLatLng)) {
+                console.warn('[HUD] ignoring invalid coords', { avatarName, vpX, vpZ, altitude });
+                return;
+            }
             const isMe = namesEqual(avatarName, currentUser);
 
             if (!markerColors[avatarName]) markerColors[avatarName] = randColor();
